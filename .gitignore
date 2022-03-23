@@ -29,3 +29,10 @@ dkms.conf
 # test-oriented
 client
 out
+*.sh
+*.data
+*.out
+mytest.c
+
+# vscode
+.vscode/

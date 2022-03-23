@@ -6,7 +6,6 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
-
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
 MODULE_DESCRIPTION("Fibonacci engine driver");
@@ -17,26 +16,67 @@ MODULE_VERSION("0.1");
 /* MAX_LENGTH is set to 92 because
  * ssize_t can't fit the number > 92
  */
-#define MAX_LENGTH 92
-
+#define MAX_LENGTH 500
+#define SIZE 110
 static dev_t fib_dev = 0;
 static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 
-static long long fib_sequence(long long k)
+void add(char *res, char *a, char *b)
 {
-    /* FIXME: C99 variable-length array (VLA) is not allowed in Linux kernel. */
-    long long f[k + 2];
-
-    f[0] = 0;
-    f[1] = 1;
-
-    for (int i = 2; i <= k; i++) {
-        f[i] = f[i - 1] + f[i - 2];
+    int len_a = strlen(a);
+    int len_b = strlen(b);
+    char data_a[SIZE];
+    char data_b[SIZE];
+    int i = 0;
+    char buf[len_a + 2];
+    strncpy(data_a, a, len_a);
+    strncpy(data_b, b, len_b);
+    int carry = 0;
+    int diff = len_a - len_b;
+    for (i = len_b - 1; i >= 0; i--) {
+        int sum = (data_a[i + diff] - '0') + (data_b[i] - '0') + carry;
+        buf[i + diff] = '0' + sum % 10;
+        carry = sum / 10;
     }
-
-    return f[k];
+    for (i = diff - 1; i >= 0; i--) {
+        int sum = (data_a[i] - '0') + carry;
+        buf[i] = '0' + sum % 10;
+        carry = sum / 10;
+    }
+    if (carry) {
+        if (diff == 0)
+            len_a++;
+        for (i = len_a; i >= 0; i--) {
+            buf[i + 1] = buf[i];
+        }
+        buf[len_a + 1] = 0;
+        buf[0] = '0' + carry;
+    }
+    buf[len_a] = 0;
+    strncpy(res, buf, len_a + 1);
+}
+static long my_fibo(int k, char *buf)
+{
+    char f3[SIZE];
+    char f2[SIZE] = "1";
+    char f1[SIZE] = "0";
+    for (int i = 2; i <= k; ++i) {
+        add(f3, f2, f1);
+        strncpy(f1, f2, strlen(f2) + 1);
+        strncpy(f2, f3, strlen(f3) + 1);
+    }
+    if (k == 0) {
+        copy_to_user(buf, f1, strlen(f1) + 1);
+        return 0;
+    }
+    if (k == 1) {
+        copy_to_user(buf, f2, strlen(f2) + 1);
+        return 1;
+    }
+    copy_to_user(buf, f3, strlen(f3) + 1);
+    return k;
 }
 
 static int fib_open(struct inode *inode, struct file *file)
@@ -60,7 +100,8 @@ static ssize_t fib_read(struct file *file,
                         size_t size,
                         loff_t *offset)
 {
-    return (ssize_t) fib_sequence(*offset);
+    return (ssize_t) my_fibo(*offset, buf);
+    // return (ssize_t) fib_sequence(*offset);
 }
 
 /* write operation is skipped */
