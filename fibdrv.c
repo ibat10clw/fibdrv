@@ -23,39 +23,33 @@ static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 
-void add(char *res, char *a, char *b)
+static void add(char *a, char *b, char *out)
 {
     int len_a = strlen(a);
     int len_b = strlen(b);
-    char data_a[SIZE];
-    char data_b[SIZE];
     int i = 0;
-    char buf[len_a + 2];
-    strncpy(data_a, a, len_a);
-    strncpy(data_b, b, len_b);
     int carry = 0;
     int diff = len_a - len_b;
     for (i = len_b - 1; i >= 0; i--) {
-        int sum = (data_a[i + diff] - '0') + (data_b[i] - '0') + carry;
-        buf[i + diff] = '0' + sum % 10;
+        int sum = (a[i + diff] - '0') + (b[i] - '0') + carry;
+        out[i + diff] = '0' + sum % 10;
         carry = sum / 10;
     }
     for (i = diff - 1; i >= 0; i--) {
-        int sum = (data_a[i] - '0') + carry;
-        buf[i] = '0' + sum % 10;
+        int sum = (a[i] - '0') + carry;
+        out[i] = '0' + sum % 10;
         carry = sum / 10;
     }
     if (carry) {
         if (diff == 0)
             len_a++;
         for (i = len_a; i >= 0; i--) {
-            buf[i + 1] = buf[i];
+            out[i + 1] = out[i];
         }
-        buf[len_a + 1] = 0;
-        buf[0] = '0' + carry;
+        out[len_a + 1] = 0;
+        out[0] = '0' + carry;
     }
-    buf[len_a] = 0;
-    strncpy(res, buf, len_a + 1);
+    out[len_a] = 0;
 }
 static long my_fibo(int k, char *buf)
 {
@@ -63,7 +57,7 @@ static long my_fibo(int k, char *buf)
     char f2[SIZE] = "1";
     char f1[SIZE] = "0";
     for (int i = 2; i <= k; ++i) {
-        add(f3, f2, f1);
+        add(f2, f1, f3);
         strncpy(f1, f2, strlen(f2) + 1);
         strncpy(f2, f3, strlen(f3) + 1);
     }
