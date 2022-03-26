@@ -171,26 +171,32 @@ static int fib_release(struct inode *inode, struct file *file)
     mutex_unlock(&fib_mutex);
     return 0;
 }
+static ktime_t kt;
+static long long fib_time_proxy(long long k, char *buf)
+{
+    kt = ktime_get();
+    long long result = fast_fib(k, buf);
+    kt = ktime_sub(ktime_get(), kt);
 
+    return result;
+}
 /* calculate the fibonacci number at given offset */
 static ssize_t fib_read(struct file *file,
                         char *buf,
                         size_t size,
                         loff_t *offset)
 {
-    return (ssize_t) fast_fib(*offset, buf);
+    return (ssize_t) fib_time_proxy(*offset, buf);
     // return (ssize_t) fib_sequence(*offset);
 }
-
 /* write operation is skipped */
 static ssize_t fib_write(struct file *file,
                          const char *buf,
                          size_t size,
                          loff_t *offset)
 {
-    return 1;
+    return ktime_to_ns(kt);
 }
-
 static loff_t fib_device_lseek(struct file *file, loff_t offset, int orig)
 {
     loff_t new_pos = 0;

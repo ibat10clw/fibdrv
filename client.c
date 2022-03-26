@@ -10,7 +10,7 @@
 int main()
 {
     long long sz;
-    char buf[1];
+    char buf[110];
     char write_buf[110] = "testing writing";
     int offset = 500; /* TODO: try test something bigger than the limit */
 
