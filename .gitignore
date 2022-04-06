@@ -33,6 +33,7 @@ out
 *.data
 *.out
 mytest.c
-
+data.txt
+plot.py
 # vscode
 .vscode/

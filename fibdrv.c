@@ -6,6 +6,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/slab.h>
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
@@ -19,143 +20,107 @@ MODULE_VERSION("0.1");
  */
 #define MAX_LENGTH 500
 #define SIZE 110
+#define BNSIZE 100000
+#define MAXSLOT 0xffffffffUL + 1UL
+typedef struct _bn {
+    unsigned int number[BNSIZE];
+    unsigned int size;
+} bn;
 static dev_t fib_dev = 0;
 static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 
-static void add(char *a, char *b, char *out)
+bn *init_bn(int num)
 {
-    int len_a = strlen(a);
-    int len_b = strlen(b);
-    int i = 0;
-    int carry = 0;
-    int diff = len_a - len_b;
-    for (i = len_b - 1; i >= 0; i--) {
-        int sum = (a[i + diff] - '0') + (b[i] - '0') + carry;
-        out[i + diff] = '0' + sum % 10;
-        carry = sum / 10;
+    bn *n = (bn *) kmalloc(sizeof(bn), GFP_KERNEL);
+    for (int i = 0; i < BNSIZE; ++i)
+        n->number[i] = 0;
+    n->number[0] = num;
+    n->size = 1;
+    return n;
+}
+
+static void add_bn(bn *a, bn *b, bn *c)
+{
+    unsigned long carry = 0;
+    int i;
+    c->size = a->size;
+    for (i = 0; i < b->size; ++i) {
+        unsigned int sum = a->number[i] + b->number[i] + carry;
+        carry =
+            ((unsigned long) a->number[i] + b->number[i] + carry) >= MAXSLOT;
+        c->number[i] = sum;
     }
-    for (i = diff - 1; i >= 0; i--) {
-        int sum = (a[i] - '0') + carry;
-        out[i] = '0' + sum % 10;
-        carry = sum / 10;
+    for (; i < a->size; ++i) {
+        unsigned int sum = a->number[i] + carry;
+        carry = ((unsigned long) a->number[i] + carry) >= MAXSLOT;
+        c->number[i] = sum;
     }
     if (carry) {
-        if (diff == 0)
-            len_a++;
-        for (i = len_a; i >= 0; i--) {
-            out[i + 1] = out[i];
-        }
-        out[len_a + 1] = 0;
-        out[0] = '0' + carry;
-    }
-    out[len_a] = 0;
-}
-static void sub(char *a, char *b, char *out)
-{
-    int len_a = strlen(a);
-    int len_b = strlen(b);
-    int i = 0;
-    int borrow = 0;
-    int idx = len_a - len_b;
-    for (i = len_b - 1; i >= 0; i--) {
-        int diff = (a[i + idx] - '0') - (b[i] - '0') - borrow;
-        if (diff < 0) {
-            diff += 10;
-            borrow = 1;
-        } else
-            borrow = 0;
-        out[i + idx] = '0' + diff;
-    }
-    for (i = idx - 1; i >= 0; i--) {
-        int diff = (a[i] - '0') - borrow;
-        if (diff < 0) {
-            diff += 10;
-            borrow = 1;
-        } else
-            borrow = 0;
-        out[i] = '0' + diff;
-    }
-    out[len_a] = 0;
-    i = 0;
-    while (out[i] == '0')
-        i++;
-    if (i != 0) {
-        for (int j = 0; j < len_a; ++j)
-            out[j] = out[j + i];
+        c->size++;
+        c->number[i]++;
     }
 }
-static void mul(char *a, char *b, char *out)
+static void swap_bn(bn **a, bn **b)
 {
-    int len_a = strlen(a);
-    int len_b = strlen(b);
-    int N = len_a + len_b;
-    int i;
-    memset(out, '0', N);
-    out[N] = 0;
-    for (i = len_b - 1; i >= 0; i--) {
-        for (int j = len_a - 1; j >= 0; j--) {
-            int digit1 = a[j] - '0';
-            int digit2 = b[i] - '0';
-            int pos = 1 + i + j;
-            int carry = out[pos] - '0';
-            int multiplication = digit1 * digit2 + carry;
-            out[pos] = (multiplication % 10) + '0';
-            out[pos - 1] += (multiplication / 10);
-        }
-    }
+    bn *tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+static char *bn_to_string(const bn *src)
+{
+    // log10(x) = log2(x) / log2(10) ~= log2(x) / 3.322
+    size_t len = (8 * sizeof(int) * src->size) / 3 + 2;
+    char *s = kmalloc(len, GFP_KERNEL);
+    char *p = s;
+    memset(s, '0', len - 1);
+    s[len - 1] = '\0';
 
-    i = 0;
-    while (out[i] == '0')
-        i++;
-    if (i != 0) {
-        for (int j = 0; j < N; ++j)
-            out[j] = out[j + i];
+    for (int i = src->size - 1; i >= 0; i--) {
+        for (unsigned long d = 1U << 31; d; d >>= 1) {
+            // double logical not can make the result to 1
+            int carry = !!(d & src->number[i]);
+            for (int j = len - 2; j >= 0; j--) {
+                s[j] += s[j] - '0' + carry;
+                carry = (s[j] > '9');
+                if (carry)
+                    s[j] -= 10;
+            }
+        }
     }
+    // skip leading zero
+    while (p[0] == '0' && p[1] != '\0') {
+        p++;
+    }
+    memmove(s, p, strlen(p) + 1);
+    return s;
 }
-static long fast_fib(int k, char *buf)
+static int fibo(int num, char *buf)
 {
-    if (k == 0) {
+    if (num == 0) {
         copy_to_user(buf, "0", 2);
-        return k;
+        return 0;
     }
-
-    if (k == 1) {
+    if (num == 1) {
         copy_to_user(buf, "1", 2);
-        return k;
+        return 1;
     }
-    int stack[100];
-    int top = 0;
-    while (k > 1) {
-        stack[top++] = k;
-        k /= 2;
+    bn *a = init_bn(1);
+    bn *b = init_bn(0);
+    bn *c = init_bn(0);
+    for (int i = 2; i <= num; ++i) {
+        add_bn(a, b, c);
+        swap_bn(&a, &c);
+        swap_bn(&b, &c);
     }
-    char f1[SIZE] = "1";
-    char f2[SIZE] = "1";
-    char tmp1[SIZE];
-    char tmp2[SIZE];
-    char res1[SIZE];
-    while (top--) {
-        int n = stack[top];
-        // f1 = f1 * (2 * f2 - f1)
-        mul("2", f2, tmp1);
-        sub(tmp1, f1, tmp2);
-        mul(tmp2, f1, res1);
-        // f2 = f1 ** 2 + f2 ** 2
-        mul(f1, f1, tmp1);
-        mul(f2, f2, tmp2);
-        add(tmp2, tmp1, f2);
-        if (n % 2 == 1) {
-            add(f2, res1, tmp1);
-            strncpy(f1, f2, strlen(f2) + 1);
-            strncpy(f2, tmp1, strlen(tmp1) + 1);
-        } else {
-            strncpy(f1, res1, strlen(res1) + 1);
-        }
-    }
-    copy_to_user(buf, f1, strlen(f1) + 1);
-    return k;
+    char *res = bn_to_string(a);
+    copy_to_user(buf, res, strlen(res) + 1);
+    kfree(res);
+    kfree(a);
+    kfree(b);
+    kfree(c);
+    return num;
 }
 static int fib_open(struct inode *inode, struct file *file)
 {
@@ -175,9 +140,8 @@ static ktime_t kt;
 static long long fib_time_proxy(long long k, char *buf)
 {
     kt = ktime_get();
-    long long result = fast_fib(k, buf);
+    long long result = fibo(k, buf);
     kt = ktime_sub(ktime_get(), kt);
-
     return result;
 }
 /* calculate the fibonacci number at given offset */
@@ -187,7 +151,6 @@ static ssize_t fib_read(struct file *file,
                         loff_t *offset)
 {
     return (ssize_t) fib_time_proxy(*offset, buf);
-    // return (ssize_t) fib_sequence(*offset);
 }
 /* write operation is skipped */
 static ssize_t fib_write(struct file *file,
